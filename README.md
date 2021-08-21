@@ -14,6 +14,7 @@ The pipeline is built and deployed to AWS and backed by AWS cloudformation/SAM f
 
 1. get api keys from the [twitter api](https://developer.twitter.com/en/docs) and specify credentials in `credentials.py`
 2. download and configure the [aws cli](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-configure.html)
+3. install dependencies: run `pip install -r requirements.txt`
 
 ### deploying the stack
 

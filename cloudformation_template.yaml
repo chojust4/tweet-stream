@@ -1,0 +1,241 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: My beautiful twitter data pipeline
+
+Parameters:
+  DataLakeName:
+    Type: String
+    Default: tweet-data-lake
+    Description: "Name of data lake for raw tweet data"
+  DeliveryStreamName:
+    Type: String
+    Default: TweetDeliveryStream
+    Description: "Name of delivery stream for kinesis firehose"
+  DataWarehouseName:
+    Type: String
+    Default: tweet-data-warehouse
+    Description: "data warehouse for transformed tweet data"
+  ElasticsearchDomainName:
+    Default: tweet-es-domain
+    Type: String
+    Description: "name of the elastic search domain name"
+
+Resources:
+  # kinesis firehose
+  DeliveryStream:
+    DependsOn:
+      - DeliveryPolicy
+    Type: AWS::KinesisFirehose::DeliveryStream
+    Properties:
+      ExtendedS3DestinationConfiguration:
+        BucketARN: !Join
+          - ''
+          - - 'arn:aws:s3:::'
+            - !Ref DataLake
+        BufferingHints:
+          IntervalInSeconds: 60
+          SizeInMBs: 5
+        CompressionFormat: UNCOMPRESSED
+        Prefix: firehose/
+        RoleARN: !GetAtt DeliveryRole.Arn
+      DeliveryStreamName: !Ref DeliveryStreamName
+
+  # s3 bucket for raw data
+  DataLake:
+    Type: AWS::S3::Bucket
+    DependsOn:
+      - TransformerLambdaPermission
+    Properties:
+      BucketName: !Ref DataLakeName
+      VersioningConfiguration:
+        Status: Enabled
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt TransformerLambdaFunction.Arn
+
+  # s3 bucket for transformed data
+  DataWarehouse:
+    Type: AWS::S3::Bucket
+    DependsOn:
+      - ProcessingLambdaPermission
+    Properties:
+      BucketName: !Ref DataWarehouseName
+      VersioningConfiguration:
+        Status: Enabled
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt ProcessingLambdaFunction.Arn
+
+  TransformerLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref TransformerLambdaFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::${DataLakeName}'
+      SourceAccount: !Ref AWS::AccountId
+
+  TransformerLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: GetAndPutObjects
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                - s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${DataLakeName}/*'
+              - Effect: Allow
+                Action:
+                - s3:PutObject
+                Resource: !Sub 'arn:aws:s3:::${DataWarehouseName}/*'
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "arn:aws:logs:*:*:*"
+
+  ProcessingLambdaExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: GetObjectsAndES
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                Resource: !Sub 'arn:aws:s3:::${DataWarehouseName}/*'
+              - Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "arn:aws:logs:*:*:*"
+              - Effect: Allow
+                Action:
+                  - es:*
+                Resource: !Sub "arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${ElasticsearchDomainName}/*"
+
+  TransformerLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./handlers
+      Handler: transformer.lambda_handler
+      Runtime: python3.8
+      Timeout: 60
+      MemorySize: 1024
+      Role: !GetAtt TransformerLambdaExecutionRole.Arn
+
+  ProcessingLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: 'lambda:InvokeFunction'
+      FunctionName: !Ref ProcessingLambdaFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub 'arn:aws:s3:::${DataWarehouseName}'
+      SourceAccount: !Ref AWS::AccountId
+
+  ProcessingLambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ./handlers/processor-deployment-package.zip
+      Handler: processor.lambda_handler
+      Runtime: python3.8
+      Timeout: 60
+      MemorySize: 1024
+      Role: !GetAtt ProcessingLambdaExecutionRole.Arn
+
+  DeliveryRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: ''
+            Effect: Allow
+            Principal:
+              Service: firehose.amazonaws.com
+            Action: 'sts:AssumeRole'
+            Condition:
+              StringEquals:
+                'sts:ExternalId': !Ref 'AWS::AccountId'
+
+  DeliveryPolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: firehose_delivery_policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - 's3:AbortMultipartUpload'
+              - 's3:GetBucketLocation'
+              - 's3:GetObject'
+              - 's3:ListBucket'
+              - 's3:ListBucketMultipartUploads'
+              - 's3:PutObject'
+            Resource:
+              - !Join
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref DataLake
+              - !Join
+                - ''
+                - - 'arn:aws:s3:::'
+                  - !Ref DataLake
+                  - '*'
+      Roles:
+        - !Ref DeliveryRole
+
+  TweetElasticsearchDomain:
+    Type: AWS::Elasticsearch::Domain
+    Properties:
+      DomainName: !Sub "${ElasticsearchDomainName}"
+      ElasticsearchVersion: '7.10'
+      ElasticsearchClusterConfig:
+        InstanceCount: 2
+        InstanceType: 't2.small.elasticsearch'
+        ZoneAwarenessEnabled: true
+      EBSOptions:
+        EBSEnabled: True
+        Iops: 0
+        VolumeType: 'gp2'
+        VolumeSize: 10
+      SnapshotOptions:
+        AutomatedSnapshotStartHour: 0
+      AccessPolicies:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              AWS:
+                - !Sub "arn:aws:iam::${AWS::AccountId}:root"
+                - !GetAtt ProcessingLambdaExecutionRole.Arn
+            Action: "es:*"
+            Resource: !Sub "arn:aws:es:${AWS::Region}:${AWS::AccountId}:domain/${ElasticsearchDomainName}/*"

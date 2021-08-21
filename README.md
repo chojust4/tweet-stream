@@ -1,26 +1,10 @@
 ### tweet-stream
 
-`tweet-stream` is a simple, serverless data pipeline used to extract and transform live tweets in real time. 
+`tweet-stream` is a simple, serverless data pipeline used to extract and transform live tweets in real time.  
 
-### aws resources
+The pipeline is built and deployed to AWS and backed by AWS cloudformation/SAM for provisioning cloud resources. 
 
-Cloudformation will create the following resources to your stack
-
-**Lambda** 
-
-2 lambda functions will be created; one to process raw data from kinesis firehose, and another to process data into elastic search
-
-**Kinesis Firehose**
-
-Kinesis firehose resource will be created to load data into S3. Buffer times can be configured in `cloudformation_template.yaml`
-
-**S3**
-
-2 S3 buckets will be created; one for raw tweet data as json, and another for filtered data as a csv file
-
-**ElasticSearch**
-
-An elasticsearch domain (es cluster) will be created; details can be found in `cloudformation_template.yaml`
+---
 
 ### prerequisites
 
@@ -47,4 +31,4 @@ chmod +x ./sam-deploy.sh
 
 ### streaming live tweets to kinesis firehose
 
-run `tweet_collector.py` on your local machine and watch the tweets propagate through your piepline!
+run `tweet_collector.py` on your local machine and watch the tweets propagate through your pipeline!

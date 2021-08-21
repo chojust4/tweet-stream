@@ -1,7 +1,7 @@
-bucket="twitter-data-pipeline-justin"
+bucket="..." # your s3 bucket
 template="cloudformation_template.yaml"
 output="packaged.yaml"
-stack="twitter-data-pipeline"
+stack="..." # your cloudformation stack name
 
 sam package \
     --template-file $template \

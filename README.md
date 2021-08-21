@@ -6,7 +6,7 @@ The pipeline is built and deployed to AWS and backed by AWS cloudformation/SAM f
 
 ![data-pipeline](https://github.com/chojust4/files/blob/main/aws-data-pipeline.png)
 
-**TODO: setup connection to POST data to es domain**
+**TODO: setup connection to POST data to es domain from lambda**
 
 ---
 
